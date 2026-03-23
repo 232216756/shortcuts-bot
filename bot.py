@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import plistlib
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -8,6 +9,7 @@ from telegram.ext import (
 )
 import anthropic
 
+# Настройки
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -26,20 +28,22 @@ TEMPLATES = {
                 "name": "Утренний режим",
                 "desc": "В 7:30 — выключить Do Not Disturb, яркость 80%, открыть погоду",
                 "actions": [
-                    {"WFWorkflowActionIdentifier": "is.workflow.actions.setbluetooth", "WFWorkflowActionParameters": {}},
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.setbrightness", "WFWorkflowActionParameters": {"value": 0.8}},
                     {"WFWorkflowActionIdentifier": "is.workflow.actions.openapp", "WFWorkflowActionParameters": {"WFAppIdentifier": "com.apple.weather"}}
                 ]
             },
             {
                 "id": "night_mode",
                 "name": "Ночной режим",
-                "desc": "В 23:00 — включить Do Not Disturb, яркость 10%, выключить WiFi",
-                "actions": []
+                "desc": "В 23:00 — включить Do Not Disturb, яркость 10%",
+                "actions": [
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.setbrightness", "WFWorkflowActionParameters": {"value": 0.1}}
+                ]
             },
             {
                 "id": "work_focus",
                 "name": "Рабочий фокус",
-                "desc": "Включить фокус Работа, выключить уведомления соцсетей",
+                "desc": "Включить фокус Работа, выключить уведомления",
                 "actions": []
             },
         ]
@@ -51,19 +55,19 @@ TEMPLATES = {
                 "id": "send_location_telegram",
                 "name": "Геолокация в Telegram",
                 "desc": "Одна кнопка — отправить текущее местоположение в Telegram",
-                "actions": []
-            },
-            {
-                "id": "send_location_sms",
-                "name": "Геолокация по SMS",
-                "desc": "Отправить координаты на заданный номер через SMS",
-                "actions": []
+                "actions": [
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.getlocation", "WFWorkflowActionParameters": {}},
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.sendmessage", "WFWorkflowActionParameters": {"text": "Мое местоположение: {{Location}}"}}
+                ]
             },
             {
                 "id": "arrived_home",
                 "name": "Я дома",
                 "desc": "Нажать кнопку — отправить сообщение 'Я дома' и координаты",
-                "actions": []
+                "actions": [
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.getlocation", "WFWorkflowActionParameters": {}},
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.sendmessage", "WFWorkflowActionParameters": {"text": "Я дома! Мои координаты: {{Location}}"}}
+                ]
             },
         ]
     },
@@ -74,19 +78,18 @@ TEMPLATES = {
                 "id": "translate_clipboard",
                 "name": "Перевести буфер",
                 "desc": "Скопировал текст → нажал → получил перевод на русский",
-                "actions": []
+                "actions": [
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.getclipboard", "WFWorkflowActionParameters": {}},
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.text", "WFWorkflowActionParameters": {"text": "Перевод: {{Clipboard}}"}}
+                ]
             },
             {
                 "id": "shorten_url",
                 "name": "Сократить ссылку",
                 "desc": "Скопировал URL → нажал → получил короткую ссылку",
-                "actions": []
-            },
-            {
-                "id": "clean_text",
-                "name": "Очистить текст",
-                "desc": "Убрать лишние пробелы и форматирование из буфера обмена",
-                "actions": []
+                "actions": [
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.getclipboard", "WFWorkflowActionParameters": {}}
+                ]
             },
         ]
     },
@@ -96,19 +99,15 @@ TEMPLATES = {
             {
                 "id": "car_bluetooth",
                 "name": "Сел в машину",
-                "desc": "Подключился Bluetooth машины → открыть Яндекс.Навигатор + включить погромче",
-                "actions": []
+                "desc": "Подключился Bluetooth машины → открыть навигатор",
+                "actions": [
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.openapp", "WFWorkflowActionParameters": {"WFAppIdentifier": "com.yandex.navigator"}}
+                ]
             },
             {
                 "id": "home_wifi",
                 "name": "Пришёл домой",
-                "desc": "Подключился к домашнему WiFi → включить тихий режим + написать 'дома'",
-                "actions": []
-            },
-            {
-                "id": "low_battery",
-                "name": "Батарея садится",
-                "desc": "Заряд < 20% → включить режим энергосбережения + уменьшить яркость",
+                "desc": "Подключился к домашнему WiFi → включить тихий режим",
                 "actions": []
             },
         ]
@@ -120,19 +119,17 @@ TEMPLATES = {
                 "id": "water_reminder",
                 "name": "Пить воду",
                 "desc": "Каждые 2 часа с 9:00 до 21:00 — напоминание выпить воду",
-                "actions": []
+                "actions": [
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.notification", "WFWorkflowActionParameters": {"text": "💧 Время пить воду!"}}
+                ]
             },
             {
                 "id": "posture_reminder",
                 "name": "Осанка",
                 "desc": "Каждый час — напоминание выпрямить спину",
-                "actions": []
-            },
-            {
-                "id": "meeting_prep",
-                "name": "Подготовка к встрече",
-                "desc": "За 10 минут до события в календаре — напоминание и тихий режим",
-                "actions": []
+                "actions": [
+                    {"WFWorkflowActionIdentifier": "is.workflow.actions.notification", "WFWorkflowActionParameters": {"text": "🧘 Выпрями спину!"}}
+                ]
             },
         ]
     },
@@ -156,7 +153,7 @@ SYSTEM_PROMPT = """Ты эксперт по iOS Shortcuts. Твоя задача
 
 Используй реальные идентификаторы iOS Shortcuts actions:
 - is.workflow.actions.getlocation — получить геолокацию
-- is.workflow.actions.sendmessage — отправить SMS
+- is.workflow.actions.sendmessage — отправить SMS/сообщение
 - is.workflow.actions.notification — показать уведомление
 - is.workflow.actions.setalarm — установить будильник
 - is.workflow.actions.setvolume — установить громкость
@@ -169,32 +166,66 @@ SYSTEM_PROMPT = """Ты эксперт по iOS Shortcuts. Твоя задача
 - is.workflow.actions.url — URL
 - is.workflow.actions.openurl — открыть URL
 - is.workflow.actions.wait — пауза в секундах
-- is.workflow.actions.nothing — ничего не делать
 
 Генерируй только то, что реально поддерживает iOS Shortcuts. Не выдумывай действия."""
 
 
 async def generate_shortcut(user_request: str) -> dict:
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": f"Создай iOS Shortcut: {user_request}"}]
-    )
-    text = message.content[0].text.strip()
-    # убираем markdown если вдруг есть
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text.strip())
+    """Генерация shortcut через Claude AI"""
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model="claude-3-sonnet-20241022",
+            max_tokens=1000,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": f"Создай iOS Shortcut: {user_request}"}]
+        )
+        text = message.content[0].text.strip()
+        
+        # Очистка от markdown
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+        elif "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        
+        text = text.strip()
+        
+        # Парсим JSON
+        result = json.loads(text)
+        
+        # Проверяем структуру
+        if "name" not in result:
+            result["name"] = "Моя команда"
+        if "description" not in result:
+            result["description"] = user_request[:100]
+        if "actions" not in result:
+            result["actions"] = []
+        
+        return result
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parse error: {e}\nText: {text}")
+        # Возвращаем дефолтную структуру
+        return {
+            "name": "Моя команда",
+            "description": user_request[:100],
+            "actions": []
+        }
+    except Exception as e:
+        logger.error(f"Generation error: {e}")
+        return {
+            "name": "Моя команда",
+            "description": user_request[:100],
+            "actions": []
+        }
 
 
 def build_shortcut_plist(shortcut_data: dict) -> bytes:
     """Создаём минимальный валидный .shortcut файл (plist формат)"""
-    import plistlib
     actions = shortcut_data.get("actions", [])
+    
     plist_data = {
         "WFWorkflowActions": actions,
         "WFWorkflowClientVersion": "2600.0.57",
@@ -212,6 +243,7 @@ def build_shortcut_plist(shortcut_data: dict) -> bytes:
         "WFWorkflowOutputContentItemClasses": [],
         "WFWorkflowTypes": [],
     }
+    
     return plistlib.dumps(plist_data, fmt=plistlib.FMT_XML)
 
 
@@ -286,60 +318,68 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data.startswith("tpl_"):
-        _, cat_id, item_id = data.split("_", 2)
-        cat = TEMPLATES[cat_id]
-        item = next(i for i in cat["items"] if i["id"] == item_id)
-        context.user_data["pending_template"] = item
-
-        await query.edit_message_text(
-            f"📌 *{item['name']}*\n\n{item['desc']}\n\nОтправить тебе этот шаблон?",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Да, скачать!", callback_data=f"send_tpl_{cat_id}_{item_id}")],
-                [InlineKeyboardButton("« Назад", callback_data=f"cat_{cat_id}")],
-            ])
-        )
+        parts = data.split("_", 2)
+        if len(parts) >= 3:
+            cat_id = parts[1]
+            item_id = parts[2]
+            cat = TEMPLATES[cat_id]
+            item = next((i for i in cat["items"] if i["id"] == item_id), None)
+            
+            if item:
+                context.user_data["pending_template"] = item
+                await query.edit_message_text(
+                    f"📌 *{item['name']}*\n\n{item['desc']}\n\nОтправить тебе этот шаблон?",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("✅ Да, скачать!", callback_data=f"send_tpl_{cat_id}_{item_id}")],
+                        [InlineKeyboardButton("« Назад", callback_data=f"cat_{cat_id}")],
+                    ])
+                )
 
     elif data.startswith("send_tpl_"):
-        _, cat_id, item_id = data.split("_", 2)
-        cat = TEMPLATES[cat_id]
-        item = next(i for i in cat["items"] if i["id"] == item_id)
+        parts = data.split("_", 2)
+        if len(parts) >= 3:
+            cat_id = parts[1]
+            item_id = parts[2]
+            cat = TEMPLATES[cat_id]
+            item = next((i for i in cat["items"] if i["id"] == item_id), None)
+            
+            if item:
+                shortcut_data = {
+                    "name": item["name"],
+                    "description": item["desc"],
+                    "actions": item["actions"]
+                }
+                file_bytes = build_shortcut_plist(shortcut_data)
+                filename = f"{item_id}.shortcut"
 
-        shortcut_data = {
-            "name": item["name"],
-            "description": item["desc"],
-            "actions": item["actions"]
-        }
-        file_bytes = build_shortcut_plist(shortcut_data)
-        filename = f"{item_id}.shortcut"
-
-        await query.edit_message_text(f"⬇️ Отправляю *{item['name']}*...", parse_mode="Markdown")
-        await query.message.reply_document(
-            document=file_bytes,
-            filename=filename,
-            caption=(
-                f"✅ *{item['name']}*\n\n"
-                f"{item['desc']}\n\n"
-                "📱 *Как установить:*\n"
-                "1. Нажми на файл\n"
-                "2. Откроется приложение Команды\n"
-                "3. Нажми «Добавить команду»\n\n"
-                "Готово!"
-            ),
-            parse_mode="Markdown",
-            reply_markup=back_to_main()
-        )
+                await query.edit_message_text(f"⬇️ Отправляю *{item['name']}*...", parse_mode="Markdown")
+                await query.message.reply_document(
+                    document=file_bytes,
+                    filename=filename,
+                    caption=(
+                        f"✅ *{item['name']}*\n\n"
+                        f"{item['desc']}\n\n"
+                        "📱 *Как установить:*\n"
+                        "1. Нажми на файл\n"
+                        "2. Откроется приложение Команды\n"
+                        "3. Нажми «Добавить команду»\n\n"
+                        "Готово!"
+                    ),
+                    parse_mode="Markdown",
+                    reply_markup=back_to_main()
+                )
 
     elif data == "custom":
         context.user_data["waiting_for_custom"] = True
         await query.edit_message_text(
             "✨ *Своя команда*\n\n"
             "Опиши что должна делать команда — простым языком.\n\n"
-            "Например:\n"
-            "• _Каждое утро в 7:30 отправляй мою геолокацию жене_\n"
-            "• _Когда подключаюсь к WiFi в офисе — включи фокус Работа_\n"
-            "• _Кнопка которая включает фонарик и ставит таймер на 10 минут_\n\n"
-            "Стоимость: *20 ⭐ Telegram Stars* (~20 ₽)\n\n"
+            "**Примеры:**\n"
+            "• Каждое утро в 7:30 отправляй мою геолокацию жене\n"
+            "• Когда подключаюсь к WiFi в офисе — включи фокус Работа\n"
+            "• Кнопка которая включает фонарик и ставит таймер на 10 минут\n\n"
+            "💎 Стоимость: *20 ⭐ Telegram Stars* (~20 ₽)\n\n"
             "Напиши задачу:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Отмена", callback_data="main_menu")]])
@@ -355,7 +395,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             text = "📦 *Мои команды:*\n\n"
-            for h in history[-5:]:
+            for h in history[-10:]:
                 text += f"• {h}\n"
             await query.edit_message_text(text, parse_mode="Markdown", reply_markup=back_to_main())
 
@@ -374,27 +414,40 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Отправляем инвойс для оплаты Stars
     await update.message.reply_invoice(
-        title="Генерация iOS Shortcut",
+        title="✨ Генерация iOS Shortcut",
         description=f"Команда: {user_request[:100]}",
         payload=f"shortcut_{update.effective_user.id}",
-        currency="XTR",  # Telegram Stars
+        currency="XTR",
         prices=[LabeledPrice("Генерация команды", STARS_PRICE)],
+        start_parameter="generate_shortcut",
     )
 
 
 async def pre_checkout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Подтверждение оплаты"""
     await update.pre_checkout_query.answer(ok=True)
 
 
 async def successful_payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка успешной оплаты"""
     user_request = context.user_data.get("pending_request", "")
+    
+    if not user_request:
+        await update.message.reply_text(
+            "❌ Не найдена задача для генерации. Попробуй еще раз.",
+            reply_markup=back_to_main()
+        )
+        return
 
     msg = await update.message.reply_text("⚙️ Оплата получена! Генерирую команду...")
 
     try:
         shortcut_data = await generate_shortcut(user_request)
         file_bytes = build_shortcut_plist(shortcut_data)
-        filename = shortcut_data.get("name", "shortcut").replace(" ", "_") + ".shortcut"
+        
+        # Безопасное имя файла
+        safe_name = shortcut_data.get("name", "shortcut").replace(" ", "_").replace("/", "_").replace("\\", "_")
+        filename = f"{safe_name}.shortcut"
 
         # Сохраняем в историю
         history = context.user_data.get("history", [])
@@ -412,16 +465,21 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
                 "1. Нажми на файл\n"
                 "2. Откроется приложение Команды\n"
                 "3. Нажми «Добавить команду»\n\n"
-                "Готово!"
+                "✨ Готово! Команда в твоем телефоне."
             ),
             parse_mode="Markdown",
             reply_markup=back_to_main()
         )
+        
+        # Очищаем pending_request
+        context.user_data.pop("pending_request", None)
 
     except Exception as e:
         logger.error(f"Generation error: {e}")
         await msg.edit_text(
-            "❌ Что-то пошло не так при генерации. Напиши мне — разберёмся и вернём Stars.",
+            "❌ Ошибка при генерации команды.\n\n"
+            "Пожалуйста, попробуй еще раз или опиши задачу проще.\n"
+            "Если ошибка повторяется — напиши @support",
             reply_markup=back_to_main()
         )
 
@@ -429,6 +487,13 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
 # ─── Запуск ──────────────────────────────────────────────────────────────────
 
 def main():
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN not set!")
+        return
+    if not ANTHROPIC_API_KEY:
+        logger.error("ANTHROPIC_API_KEY not set!")
+        return
+    
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -437,7 +502,7 @@ def main():
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    logger.info("Bot started!")
+    logger.info("🤖 Bot started!")
     app.run_polling()
 
 
