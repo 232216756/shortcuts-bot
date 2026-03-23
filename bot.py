@@ -311,64 +311,67 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("cat_"):
         cat_id = data[4:]
-        cat = TEMPLATES[cat_id]
-        await query.edit_message_text(
-            f"{cat['label']}\n\nВыбери шаблон:",
-            reply_markup=category_keyboard(cat_id)
-        )
+        if cat_id in TEMPLATES:
+            cat = TEMPLATES[cat_id]
+            await query.edit_message_text(
+                f"{cat['label']}\n\nВыбери шаблон:",
+                reply_markup=category_keyboard(cat_id)
+            )
 
     elif data.startswith("tpl_"):
         parts = data.split("_", 2)
         if len(parts) >= 3:
             cat_id = parts[1]
             item_id = parts[2]
-            cat = TEMPLATES[cat_id]
-            item = next((i for i in cat["items"] if i["id"] == item_id), None)
-            
-            if item:
-                context.user_data["pending_template"] = item
-                await query.edit_message_text(
-                    f"📌 *{item['name']}*\n\n{item['desc']}\n\nОтправить тебе этот шаблон?",
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("✅ Да, скачать!", callback_data=f"send_tpl_{cat_id}_{item_id}")],
-                        [InlineKeyboardButton("« Назад", callback_data=f"cat_{cat_id}")],
-                    ])
-                )
+            if cat_id in TEMPLATES:
+                cat = TEMPLATES[cat_id]
+                item = next((i for i in cat["items"] if i["id"] == item_id), None)
+                
+                if item:
+                    context.user_data["pending_template"] = item
+                    await query.edit_message_text(
+                        f"📌 *{item['name']}*\n\n{item['desc']}\n\nОтправить тебе этот шаблон?",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("✅ Да, скачать!", callback_data=f"send_tpl_{cat_id}_{item_id}")],
+                            [InlineKeyboardButton("« Назад", callback_data=f"cat_{cat_id}")],
+                        ])
+                    )
 
     elif data.startswith("send_tpl_"):
         parts = data.split("_", 2)
         if len(parts) >= 3:
             cat_id = parts[1]
             item_id = parts[2]
-            cat = TEMPLATES[cat_id]
-            item = next((i for i in cat["items"] if i["id"] == item_id), None)
-            
-            if item:
-                shortcut_data = {
-                    "name": item["name"],
-                    "description": item["desc"],
-                    "actions": item["actions"]
-                }
-                file_bytes = build_shortcut_plist(shortcut_data)
-                filename = f"{item_id}.shortcut"
+            if cat_id in TEMPLATES:
+                cat = TEMPLATES[cat_id]
+                item = next((i for i in cat["items"] if i["id"] == item_id), None)
+                
+                if item:
+                    shortcut_data = {
+                        "name": item["name"],
+                        "description": item["desc"],
+                        "actions": item["actions"]
+                    }
+                    file_bytes = build_shortcut_plist(shortcut_data)
+                    filename = f"{item_id}.shortcut"
 
-                await query.edit_message_text(f"⬇️ Отправляю *{item['name']}*...", parse_mode="Markdown")
-                await query.message.reply_document(
-                    document=file_bytes,
-                    filename=filename,
-                    caption=(
-                        f"✅ *{item['name']}*\n\n"
-                        f"{item['desc']}\n\n"
-                        "📱 *Как установить:*\n"
-                        "1. Нажми на файл\n"
-                        "2. Откроется приложение Команды\n"
-                        "3. Нажми «Добавить команду»\n\n"
-                        "Готово!"
-                    ),
-                    parse_mode="Markdown",
-                    reply_markup=back_to_main()
-                )
+                    await query.edit_message_text(f"⬇️ Отправляю *{item['name']}*...", parse_mode="Markdown")
+                    await query.message.reply_document(
+                        document=file_bytes,
+                        filename=filename,
+                        caption=(
+                            f"✅ *{item['name']}*\n\n"
+                            f"{item['desc']}\n\n"
+                            "📱 *Как установить:*\n"
+                            "1. Нажми на файл\n"
+                            "2. Откроется приложение Команды\n"
+                            "3. Нажми «Добавить команду»\n\n"
+                            "Готово!"
+                        ),
+                        parse_mode="Markdown",
+                        reply_markup=back_to_main()
+                    )
 
     elif data == "custom":
         context.user_data["waiting_for_custom"] = True
