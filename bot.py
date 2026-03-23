@@ -175,7 +175,7 @@ async def generate_shortcut(user_request: str) -> dict:
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         message = client.messages.create(
-            model="claude-3-sonnet-20241022",
+            model="claude-3-5-sonnet-20241022",
             max_tokens=1000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": f"Создай iOS Shortcut: {user_request}"}]
@@ -420,6 +420,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title="✨ Генерация iOS Shortcut",
         description=f"Команда: {user_request[:100]}",
         payload=f"shortcut_{update.effective_user.id}",
+        provider_token="",  # 👈 ОБЯЗАТЕЛЬНО для python-telegram-bot >= 21.0
         currency="XTR",
         prices=[LabeledPrice("Генерация команды", STARS_PRICE)],
         start_parameter="generate_shortcut",
@@ -491,10 +492,10 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
 
 def main():
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN not set!")
+        logger.error("❌ BOT_TOKEN not set! Add it to environment variables.")
         return
     if not ANTHROPIC_API_KEY:
-        logger.error("ANTHROPIC_API_KEY not set!")
+        logger.error("❌ ANTHROPIC_API_KEY not set! Add it to environment variables.")
         return
     
     app = Application.builder().token(BOT_TOKEN).build()
@@ -505,7 +506,7 @@ def main():
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    logger.info("🤖 Bot started!")
+    logger.info("🤖 Bot started successfully! Waiting for messages...")
     app.run_polling()
 
 
